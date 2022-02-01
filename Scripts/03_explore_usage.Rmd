@@ -1,0 +1,123 @@
+---
+title: "03_explore_usage"
+author: "A.Chafetz"
+date: {r Sys.Date()}
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_dir=here::here('markdown'))})
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+  library(tidyverse)
+  library(glamr)
+  library(vroom)
+  library(lubridate)
+  library(here)
+  library(glue)
+  library(glitr)
+  library(extrafont)
+```
+
+Starting at the end of January  2022, M/CIO setup a monthly refresh of the Tableau Postgres DB to pull specified data fields on Tableau Server usage for the OHA folder. At this point, we only have data available for the prior 6 months. This analysis will review the most recent data available.
+
+```{r}
+file <- list.files(here("Data"), "Project-Historical-Event-Data", 
+                   full.names = TRUE) %>% 
+  last() %>% 
+  here()
+
+df_usage <- vroom(file, col_types = c(.default = "c"))
+```
+
+Convert `created_at`, `user_login_at`, and `user_logout_at` columns to date/time.
+
+```{r}
+df_usage <- df_usage %>% 
+  mutate(across(c(created_at, user_login_at, user_logout_at), 
+                mdy_hms, quiet = TRUE))
+```
+
+We need to identify the workbook owner/developer to exclude them from any view analysis.
+
+```{r}
+ #identify workbook onwer in order to exclude from counts
+  df_owner <- df_usage %>% 
+    filter(action_type %in% c("Publish", "Update")) %>% 
+    group_by(workbook_name) %>%
+    filter(created_at == max(created_at, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    distinct(workbook_name, workbook_owner = user_name)  
+
+  #flag developers in data
+  df_usage <- df_usage %>% 
+    left_join(df_owner, by = "workbook_name") %>% 
+    mutate(is_workbook_owner = user_name == workbook_owner) %>% 
+    select(-workbook_owner)
+  
+```
+
+
+Let's remove any Tableau workbooks that are in the Administrator, Archive, Draft, DRAFT, Draft Workbooks, Drafts, Drafts/QC, or PrEP Workbook in Progress/QC and any workbooks titles that contain draft, QC, or dummy.
+
+```{r}
+df_usage <- df_usage %>% 
+  filter(project_name %ni% c("Administrator", "Archive", "Draft", "DRAFT",
+                             "Draft Workbooks", "Drafts", "Drafts/QC", 
+                             "PrEP Workbook in Progress/QC"),
+         str_detect(tolower(workbook_name), "draft|qc|dummy", negate = TRUE))
+
+```
+
+
+```{r, include=FALSE}
+date_range <- df_usage %>% 
+    summarise(min_date = min(created_at, na.rm = TRUE),
+              max_date = max(created_at, na.rm = TRUE)) %>% 
+    mutate(range = glue("{as.Date(min_date) %>% format('%B %d, %Y')} to {as.Date(max_date) %>% format('%B %d, %Y')}")) %>% 
+    pull()
+
+unique(df_usage$workbook_name) %>% length()
+```
+
+The data from `r basename(file)` covers the period from `r date_range`. Across this time frame, OHA's Tableau Server folder contained `r length(unique(df_usage$workbook_name)) ` workbooks and had `r length(unique(df_usage$user_name))` unique users access these workbooks.
+
+
+```{r}
+
+df_access <- df_usage %>% 
+    filter(event_type_name == "Access View",
+           is_workbook_owner == FALSE) %>% 
+    distinct(project_name, workbook_name, user_name, friendly_name, view_name, created_at) %>% 
+    arrange(workbook_name, user_name, created_at, view_name) %>%
+    group_by(user_name, workbook_name, view_name) %>% 
+    mutate(unique_view = created_at == min(created_at) | 
+             created_at > (lag(created_at) + minutes(15))) %>% 
+    ungroup() %>% 
+    group_by(user_name) %>% 
+    mutate(unique_session = created_at == min(created_at) | 
+             created_at > (lag(created_at) + minutes(15))) %>% 
+    ungroup() %>% 
+    mutate(unique_session = ifelse(is.na(unique_session), TRUE, unique_session))
+
+df_access %>% 
+  mutate(date = as.Date(created_at)) %>% 
+  count(date, wt = unique_session) %>% 
+  ggplot(aes(date, n)) +
+  geom_area(color = trolley_grey, fill = trolley_grey_light, alpha = .6) +
+  scale_x_date(date_breaks = "1 month") +
+  labs(x = NULL, y = NULL,
+       subtitle = "Unique Daily Tableau Server Sessions",
+       caption = glue("A new session occurs at log in or interacting after a 15 minute or more break
+       Source: OHA Folder Project Historical Event Data {date_range}")) +
+  si_style()
+```
+
+
+
+
