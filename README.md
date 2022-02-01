@@ -3,12 +3,13 @@ Review OHA Tableau Server Workbook Access and Usage
 
 ### Motivating questions
 
-  - Can we identify under-utilized views or workbooks?
-  - Who benefits from the workbook/view - SIEI, OHA, or missions?
-  - Is access driven by email reminders (i.e. SIEI email about being updated)?
-  - Are users viewing one or multiple tabs in a session?
-  - How are users interacting with workbooks?
-  - Do users spend a "significant" amount of time on a given view?
+  1. Can we identify under-utilized views or workbooks?
+  1. Who benefits from the workbook/view - SIEI, OHA, or missions?
+  1. Is access driven by events - season processes (e.g. COP) or email reminders (i.e. SIEI email about workbooks being updated)?
+  1. Are analysts downloading workbooks for own usage?
+  1. Are users viewing one or multiple tabs in a session?
+  1. How are users interacting with workbooks?
+  1. Do users spend a "significant" amount of time on a given view?
   
 ### Data Access
 
