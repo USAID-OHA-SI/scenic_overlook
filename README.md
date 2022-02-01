@@ -3,9 +3,9 @@ Review OHA Tableau Server Workbook Access and Usage
 
 ### Motivating questions
 
-  - Can we identify under-utilized view or workbooks?
-  - Who benefits from the workbook - SIEI, OHA, or missions?
-  - Is access driven by email reminders (i.e. SIEI email about being updated)
+  - Can we identify under-utilized views or workbooks?
+  - Who benefits from the workbook/view - SIEI, OHA, or missions?
+  - Is access driven by email reminders (i.e. SIEI email about being updated)?
   - Are users viewing one or multiple tabs in a session?
   - How are users interacting with workbooks?
   - Do users spend a "significant" amount of time on a given view?
@@ -21,7 +21,7 @@ Starting at the end of January  2022, M/CIO has setup a monthly refresh of the T
 | action_type         | string  | category of interaction event user took with Tableau Server - Access, Create, Delete, Publish, Send E-Mail, Update |                                                                                                                      |
 | created_at          | date    | date and time event occured [M/D/Y H:M:S]                                                                          |                                                                                                                      |
 | datasource_name     | string  | data source on Tableau Server interacted with                                                                      |                                                                                                                      |
-| event_type_name     | string  | sub-category for action_type, providing more detail on the type of interaction                                     |                                                                                                                      |
+| event_type_name     | string  | sub-category for action_type, providing more detail on the type of interaction (see Event Type table)              |                                                                                                                      |
 | friendly_name       | string  | name of user (Last, First), some with Operating Unit information                                                   |                                                                                                                      |
 | grant_allowed_by    | string  | source allowing user to have access to action_type - Allow by Group, Allow to User, Deny to User, NA               |                                                                                                                      |
 | hist_event_id       | double  | unique indentifier for event                                                                                       |                                                                                                                      |
@@ -42,6 +42,51 @@ Starting at the end of January  2022, M/CIO has setup a monthly refresh of the T
 | user_id             | double  | unique identifier for project_name                                                                                 |                                                                                                                      |
 | view_id             | double  | unique identifier for project_name                                                                                 |                                                                                                                      |
 | workbook_id         | double  | unique identifier for project_name                                                                                 |                                                                                                                      |
+
+### Event Types
+
+| action_type | event_type_name                       |
+|-------------|---------------------------------------|
+| Access      | Access Authoring View                 |
+| Access      | Access Data Source                    |
+| Access      | Access Metric                         |
+| Access      | Access Summary ViewData               |
+| Access      | Access Underlying ViewData            |
+| Access      | Access View                           |
+| Access      | Download Data Source                  |
+| Access      | Download Flow                         |
+| Access      | Download Workbook                     |
+| Access      | Export Summary ViewData               |
+| Access      | Export Underlying ViewData            |
+| Create      | Create Metric                         |
+| Create      | Create Project                        |
+| Delete      | Delete Data Source                    |
+| Delete      | Delete Flow                           |
+| Delete      | Delete View                           |
+| Delete      | Delete Workbook                       |
+| Publish     | Publish Data Source                   |
+| Publish     | Publish Flow                          |
+| Publish     | Publish View                          |
+| Publish     | Publish Workbook                      |
+| Send E-Mail | Send Data Driven Alert (DDA) E-Mail   |
+| Send E-Mail | Send Subscription E-Mail For View     |
+| Send E-Mail | Send Subscription E-Mail For Workbook |
+| Update      | Change Project Ownership From         |
+| Update      | Change Project Ownership To           |
+| Update      | Move Datasource From                  |
+| Update      | Move Datasource To                    |
+| Update      | Move Flow From                        |
+| Update      | Move Flow To                          |
+| Update      | Move Project From                     |
+| Update      | Move Project To                       |
+| Update      | Move Workbook From                    |
+| Update      | Move Workbook To                      |
+| Update      | Refresh Workbook Extract              |
+| Update      | Run Flow                              |
+| Update      | Update Data Source                    |
+| Update      | Update Flow                           |
+| Update      | Update Project                        |
+| Update      | Update Workbook                       |
 
 ---
 
