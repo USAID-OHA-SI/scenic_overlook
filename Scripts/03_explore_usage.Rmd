@@ -220,21 +220,19 @@ df_usage %>%
             n_distinct_downloads = n(),
             .groups = "drop") %>% 
   # glimpse()
-  mutate(workbook_name = workbook_name %>% 
+  mutate(workbook_name = glue("{workbook_name} ({n_distinct_users})") %>% 
            fct_reorder(n_distinct_downloads) %>% 
-           fct_relevel("Other", after = 0)) %>% 
-  ggplot(aes(n_distinct_downloads, workbook_name
-             #fct_reorder(workbook_name, n_distinct_downloads)
-             )) +
-  
+           fct_relevel("Other (20)", after = 0)) %>% 
+  ggplot(aes(n_distinct_downloads, workbook_name)) +
   geom_col() +
+  scale_x_continuous(expand = c(.005, .005)) +
   labs(x = NULL, y = NULL,
        subtitle = "Number of distinct downloads") +
   si_style()
  
 ```
 
-```{r}
+```{r, include=FALSE}
 df_access %>% 
   filter(user_name == "bddamulira",
          workbook_name == "Advanced HIV Disease Quarterly Workbook",
