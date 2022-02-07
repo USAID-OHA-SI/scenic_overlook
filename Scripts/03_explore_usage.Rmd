@@ -200,14 +200,14 @@ wkbk_no_views <- df_viz_unique_wkbk_views %>%
 
 ```
 
-The median number of interactions in this period is `{median(df_viz_unique_views$n_unique_views)`. Of the `r nrow(df_viz_unique_views)` views published on Tableau Server, `r n_no_views` have not been interacted with in the last 6 months. Another `n_1_views` have only been interacted with once, resulting in `r percent((n_no_views + n_1_views)/nrow(df_viz_unique_views), 1)` of developed/published views within OHA Tableau Server have been viewed 1 or less times in the last 6 months.
+The median number of interactions in this period is `r {median(df_viz_unique_views$n_unique_views)`. Of the `r nrow(df_viz_unique_views)` views published on Tableau Server, `r n_no_views` have not been interacted with in the last 6 months. Another `n_1_views` have only been interacted with once, resulting in `r percent((n_no_views + n_1_views)/nrow(df_viz_unique_views), 1)` of developed/published views within OHA Tableau Server have been viewed 1 or less times in the last 6 months.
 
 If we aggregate the views up by workbook, the median workbook has `r median(df_viz_unique_wkbk_views$n_unique_views)` views. Over the 6 month periods, this means on average this median workbook is being interacted with `r round(median(df_viz_unique_wkbk_views$n_unique_views)/6,1)` a month across all USAID/PEPFAR On the upper end, we have `r top$workbook_name` being interacted with `r comma(top$n_unique_views)`. There are also `r n_u10_wkbk_views` workbooks that have been interacted with 10 or less times and a number were never opened: `r wkbk_no_views`. 
 
 
 ### Are Analyst Downloading Workbooks from Server?
 
-```{r}
+```{r, echo=FALSE, fig.height=3, fig.width=6, dpi=300}
 df_usage %>%
   filter(event_type_name == "Download Workbook") %>% 
   distinct(user_name, created_at, workbook_name) %>%
@@ -219,7 +219,6 @@ df_usage %>%
   summarise(n_distinct_users = n_distinct(user_name),
             n_distinct_downloads = n(),
             .groups = "drop") %>% 
-  # glimpse()
   mutate(workbook_name = glue("{workbook_name} ({n_distinct_users})") %>% 
            fct_reorder(n_distinct_downloads) %>% 
            fct_relevel("Other (20)", after = 0)) %>% 
