@@ -4,7 +4,8 @@ author: "A.Chafetz"
 date: {r Sys.Date()}
 knit: (function(inputFile, encoding) { 
       rmarkdown::render(inputFile,
-                        encoding=encoding, 
+                        encoding=encoding,
+                        output_file = "tableau-server-usage" 
                         output_dir=here::here('markdown'))})
 output: word_document
 ---
@@ -25,14 +26,14 @@ Starting at the end of January  2022, M/CIO setup a monthly refresh of the Table
   library(glitr)
   library(extrafont)
   library(scales)
+  library(googlesheets4)
 ```
+ 
  
 ```{r}
 #identify latest file
-file <- list.files(here("Data"), 
-                   "Project-Historical-Event-Data", 
-                   full.names = TRUE) %>% 
-  last() %>% 
+file <- return_latest(here("Data"), 
+                   "Project-Historical-Event-Data") %>% 
   here()
 
 basename(file)
@@ -68,6 +69,16 @@ We need to identify the workbook owner/developer to exclude them from any view a
   
 ```
 
+We can limit this analysis down to just the OHA workbooks identified in the [products calendar](https://sites.google.com/a/usaid.gov/gh-oha/home/oha-data-tools-resources/-oha-product-calendar).
+
+```{r}
+gs_sheet_id <- as_sheets_id("1-9U7EVKDXwWH_iSSp0BGnhEdPzuBEqC1CcgRDvBAtGQ")
+df_focal_wkbks <- read_sheet(gs_sheet_id)
+
+df_usage <- df_usage %>% 
+  filter(workbook_name %in% df_focal_wkbks$workbook_name)
+```
+
 Let's remove any Tableau workbooks that are in the Administrator, Archive, Draft, DRAFT, Draft Workbooks, Drafts, Drafts/QC, or PrEP Workbook in Progress/QC and any workbooks titles that contain draft, QC, or dummy.
 
 ```{r}
@@ -78,6 +89,29 @@ df_usage <- df_usage %>%
          str_detect(tolower(workbook_name), 
                     "(draft|qc|dummy|^test$)", 
                     negate = TRUE))
+
+```
+
+Lastly, let's create some useful functions of code we will repeat in our analysis.
+
+```{r}
+#exclude workbook owners
+exclude_wkbk_owner <- function(df){
+  df %>% 
+    filter(is_workbook_owner == FALSE)
+}
+
+#id/exclude cover page
+flag_cover_pg <- function(df, remove = FALSE){
+  df <- df %>% 
+     mutate(is_cover = str_detect(view_name,
+                               "^Cover |^Cover$|CoverPage|Intro|Contents|0\\.Home|Country Overview|Introduction|Notes|$Title"))
+  
+  if(remove == TRUE)
+    df <- filter(df, is_cover != TRUE)
+  
+  return(df)
+}
 
 ```
 
@@ -121,7 +155,7 @@ df_access <- df_access %>%
 ### What does the trend in access look like over the 6 month period?
 ```{r, echo=FALSE, fig.height=3, fig.width=6, dpi=300}
 df_access %>% 
-  filter(is_workbook_owner == FALSE) %>%
+  exclude_wkbk_owner() %>%
   mutate(date = as.Date(created_at)) %>% 
   count(date, wt = unique_session) %>% 
   ggplot(aes(date, n)) +
@@ -137,9 +171,18 @@ df_access %>%
 ### How many tabs does a workbook have?
 
 ```{r}
-  df_full_views <- df_usage %>% 
-    filter(event_type_name == "Publish View") %>% 
-    distinct(workbook_name, view_name)
+df_full_views <- df_usage %>% 
+  filter(event_type_name == "Publish View") %>% 
+  arrange(hist_event_id) %>% 
+  #filter for the last version of the workbook
+  group_by(workbook_name) %>% 
+  filter(created_at >= (max(created_at) - seconds(5))) %>% #large workbooks take a few seconds to upload
+  ungroup() %>% 
+  distinct(workbook_name, view_name) %>% 
+  #assign tab ordering
+  group_by(workbook_name) %>% 
+  mutate(tab_order = row_number()) %>% 
+  ungroup()
 ```
 
 ```{r, echo=FALSE, fig.height=3, fig.width=6, dpi=300}
@@ -161,7 +204,7 @@ df_viz_views %>%
 
 ```{r, echo=FALSE, fig.height=3, fig.width=6, dpi=300}
   df_viz_unique_views <- df_access %>% 
-    filter(is_workbook_owner == FALSE) %>% 
+    exclude_wkbk_owner() %>% 
     bind_rows(df_full_views) %>% 
     count(workbook_name, view_name, wt = unique_view, name = "n_unique_views") %>%
     mutate(n_unique_views = ifelse(is.na(n_unique_views), 0, n_unique_views)) 
@@ -200,7 +243,7 @@ wkbk_no_views <- df_viz_unique_wkbk_views %>%
 
 ```
 
-The median number of interactions in this period is `r {median(df_viz_unique_views$n_unique_views)`. Of the `r nrow(df_viz_unique_views)` views published on Tableau Server, `r n_no_views` have not been interacted with in the last 6 months. Another `n_1_views` have only been interacted with once, resulting in `r percent((n_no_views + n_1_views)/nrow(df_viz_unique_views), 1)` of developed/published views within OHA Tableau Server have been viewed 1 or less times in the last 6 months.
+The median number of interactions in this period is `r median(df_viz_unique_views$n_unique_views)`. Of the `r nrow(df_viz_unique_views)` views published on Tableau Server, `r n_no_views` have not been interacted with in the last 6 months. Another `r n_1_views` have only been interacted with once, resulting in `r percent((n_no_views + n_1_views)/nrow(df_viz_unique_views), 1)` of developed/published views within OHA Tableau Server have been viewed 1 or less times in the last 6 months.
 
 If we aggregate the views up by workbook, the median workbook has `r median(df_viz_unique_wkbk_views$n_unique_views)` views. Over the 6 month periods, this means on average this median workbook is being interacted with `r round(median(df_viz_unique_wkbk_views$n_unique_views)/6,1)` a month across all USAID/PEPFAR On the upper end, we have `r top$workbook_name` being interacted with `r comma(top$n_unique_views)`. There are also `r n_u10_wkbk_views` workbooks that have been interacted with 10 or less times and a number were never opened: `r wkbk_no_views`. 
 
@@ -221,7 +264,7 @@ df_usage %>%
             .groups = "drop") %>% 
   mutate(workbook_name = glue("{workbook_name} ({n_distinct_users})") %>% 
            fct_reorder(n_distinct_downloads) %>% 
-           fct_relevel("Other (20)", after = 0)) %>% 
+           fct_relevel("Other (8)", after = 0)) %>% 
   ggplot(aes(n_distinct_downloads, workbook_name)) +
   geom_col() +
   scale_x_continuous(expand = c(.005, .005)) +
@@ -240,6 +283,152 @@ df_access %>%
   mutate(duration = lead(created_at) - created_at)
   
 ```
+
+### Can we identify under-utilized views or workbooks?
+
+```{r}
+
+glimpse(df_access)
+
+df_pd_views <- df_access %>% 
+  exclude_wkbk_owner() %>% 
+  flag_cover_pg(remove = TRUE) %>% 
+  filter(unique_session == TRUE) %>% 
+  mutate(date = date(created_at),
+         week = floor_date(date, "week", week_start = 1)) %>% 
+  count(week, workbook_name, view_name, name = "distinct_views") %>% 
+  group_by(workbook_name, view_name) %>% 
+  mutate(distinct_views_period = sum(distinct_views)) %>% 
+  ungroup() %>% 
+  mutate(wkbk_view_name = glue("{workbook_name}/{view_name}"))
+
+
+df_pd_views %>% 
+  distinct(wkbk_view_name, distinct_views_period) %>% 
+  summarise(median = median(distinct_views_period)) 
+
+df_pd_views %>% 
+  distinct(wkbk_view_name, distinct_views_period) %>% 
+  arrange(desc(distinct_views_period)) %>% 
+  filter(str_detect(wkbk_view_name, "OVC Dashboard/"))
+
+
+#min view rate, assume being viewed every other week
+min_view_rate <- df_access %>%
+  summarise(start = min(created_at),
+            end = max(created_at)) %>% 
+  mutate(across(everything(), as.Date)) %>% 
+  mutate(period = (end - start) %>% as.character) %>% 
+  pull() %>% 
+  days() %>% 
+  time_length("weeks")/2 
+
+min_view_rate <- floor(min_view_rate)
+
+df_pd_views %>% 
+  count(workbook_name, view_name, wt = distinct_views, name = "distinct_views") %>%
+  tidylog::full_join(df_full_views) %>% 
+  tidylog::filter(!is.na(tab_order)) %>% 
+  arrange(workbook_name, tab_order) %>% 
+  mutate(distinct_views = ifelse(is.na(distinct_views), 0, distinct_views),
+         above_min_view_rate = distinct_views >= min_view_rate) %>%
+  group_by(workbook_name) %>% 
+  summarise(n_tabs = n(),
+            n_above_min_view_rate = sum(above_min_view_rate)) %>% 
+  mutate(share_above_min_view_rate = n_above_min_view_rate/n_tabs)
+  
+  distinct(workbook_name, workbook_nam, distinct_views_period) 
+
+
+updates <- glamr::pepfar_data_calendar %>% 
+  mutate(msd_release = as.Date(entry_close) + weeks(1)) %>% 
+  filter(#type == "initial",
+         msd_release >= (min(df_access$created_at) %>% as.Date),
+         msd_release <= (max(df_access$created_at) %>% as.Date)) %>% 
+  select(fiscal_year, quarter, type, msd_release) %>% 
+  pivot_wider(names_from = type,
+              values_from = msd_release)
+  pull()
+
+df_pd_views %>% 
+  filter(distinct_views_period > 100) %>% 
+  mutate(wkbk_view_name = ifelse(distinct_views_period == max(distinct_views_period),
+                                 glue("{wkbk_view_name} [total views: {distinct_views_period}]"),
+                                 glue("{wkbk_view_name} [{distinct_views_period}]"))) %>% 
+  ggplot(aes(week, fct_reorder(wkbk_view_name, distinct_views, sum),
+             fill = distinct_views)) +
+  geom_tile(color = "white") +
+  geom_vline(xintercept = updates$initial, color = "white", linetype = "dashed", size = 1) +
+  # geom_vline(xintercept = updates$clean, color = "white", linetype = "dashed", size = .6) +
+  geom_text(aes(label = distinct_views),
+            color = "white", size = 8/.pt, family = "Source Sans Pro") +
+  scale_fill_viridis_c(na.value = "purple") +
+  scale_x_date(date_breaks = "1 month", date_labels = ("%b"),
+               position = "top") +
+  labs(x = NULL, y = NULL,
+       fill = "Distinct views by week",
+       subtitle = glue("Weekly trends in distinct views for {df_pd_views %>% 
+    filter(distinct_views_period > 100) %>% distinct(wkbk_view_name) %>% nrow()} sheets with over 100 views during period")) +
+  si_style_nolines()
+  # si_style() +
+  # theme(axis.text.y = element_blank())
+
+
+df_tab_ordering <- df_pd_views %>%
+  flag_cover_pg(remove = TRUE) %>% 
+  count(workbook_name, view_name, wt = distinct_views, name = "distinct_views") %>%
+  tidylog::full_join(df_full_views) %>% 
+  tidylog::filter(!is.na(tab_order)) %>% 
+  group_by(workbook_name) %>% 
+  mutate(distinct_views_wkbk = sum(distinct_views, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(distinct_views = ifelse(is.na(distinct_views) & tab_order != 1, 0, distinct_views)) %>% 
+  arrange(workbook_name, tab_order) 
+
+df_tab_ordering %>% 
+  ggplot(aes(tab_order, fct_reorder(workbook_name, distinct_views_wkbk, max), fill = distinct_views)) +
+  geom_tile(color = "white") +
+  geom_tile(data = df_tab_ordering %>% filter(distinct_views < min_view_rate),
+            fill = NA, color = "black") +
+  geom_text(aes(label = distinct_views),
+            color = "white", size = 8/.pt, family = "Source Sans Pro") +
+  scale_fill_viridis_c(option = "D", direction = -1, na.value = "white") +
+  scale_x_continuous(expand = c(.005, .005),
+                     breaks = seq(1, 40, 1),
+                     position = "top") +
+  labs(x = NULL, y = NULL, fill = "Distinct tab views",
+       title = "EARLIER TABS IN WORKBOOK TEND TO HAVE A HIGHER VIEW RATE",
+       subtitle = "Views by sheet number",
+       caption = glue("Note: Intro/Home sheets removed
+                      Source: OHA Folder Project Historical Event Data {date_range}")) +
+  si_style_nolines()
+
+
+
+df_pd_views %>% 
+  distinct(workbook_name)
+```
+
+
+```{r}
+
+df_access %>% 
+  exclude_wkbk_owner() %>% 
+  flag_cover_pg(remove = TRUE) %>% 
+  filter(unique_session == TRUE,
+         workbook_name == "Key Populations Dashboard") %>% 
+  count(friendly_name, user_name, sort = TRUE) 
+  
+
+df_access %>% 
+  exclude_wkbk_owner() %>% 
+  flag_cover_pg(remove = TRUE) %>% 
+  filter(unique_session == TRUE) %>% 
+  count(friendly_name, user_name, sort = TRUE) 
+
+```
+
+
 
 
 
