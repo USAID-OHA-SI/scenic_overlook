@@ -20,13 +20,14 @@ Starting at the end of January  2022, M/CIO setup a monthly refresh of the Table
   library(tidyverse)
   library(glamr)
   library(vroom)
+  library(googlesheets4)
   library(lubridate)
   library(here)
   library(glue)
   library(glitr)
   library(extrafont)
   library(scales)
-  library(googlesheets4)
+  library(ggtext)
 ```
  
  
@@ -79,6 +80,37 @@ df_usage <- df_usage %>%
   filter(workbook_name %in% df_focal_wkbks$workbook_name)
 ```
 
+It will also be useful to flag what types of users are accessing the workbooks.
+
+```{r}
+gs_sheet_id_users <- as_sheets_id("1kl6rnpCELoWaOXfBr5qlhNw4rwAWMWtMRerOIqADgCU")
+df_user_base <- read_sheet(gs_sheet_id_users, sheet = "location")
+df_user_div <- read_sheet(gs_sheet_id_users, sheet = "division")
+
+df_user_base <- df_user_base %>%
+  #check to ensure each user is only assigned with one type
+  # group_by(`User Name`) %>% 
+  # filter(n() > 1)
+  rename(user_name = `User Name`,
+         user_type = `User Type`) %>% 
+  mutate(user_name = tolower(user_name))
+
+df_user_div <- df_user_div %>%
+  #check to ensure each user is only assigned with one type
+  # group_by(`User Name`) %>%
+  # filter(n() > 1)
+  rename(user_name = `User Name`,
+         user_hq_div = Division)
+
+df_user <- tidylog::full_join(df_user_base, df_user_div, by = "user_name")
+
+df_usage <- df_user_base %>% 
+  tidylog::full_join(df_user_div, by = "user_name") %>% 
+  tidylog::left_join(df_usage, ., by = "user_name") %>% 
+  relocate(user_type, user_hq_div, .after = user_name)
+
+```
+
 Let's remove any Tableau workbooks that are in the Administrator, Archive, Draft, DRAFT, Draft Workbooks, Drafts, Drafts/QC, or PrEP Workbook in Progress/QC and any workbooks titles that contain draft, QC, or dummy.
 
 ```{r}
@@ -126,30 +158,30 @@ date_range <- df_usage %>%
 
 The data from `r basename(file)` covers the period from `r date_range`. Across this time frame, OHA's Tableau Server folder contained `r length(unique(df_usage$workbook_name)) ` workbooks and had `r length(unique(df_usage$user_name))` unique users access these workbooks.
 
-
 Create unique view and sessions for counting
 
 ```{r}
 #limit events to just Access View and limit variables
 df_access <- df_usage %>% 
-    filter(event_type_name == "Access View") %>% 
-    distinct(project_name, workbook_name, user_name, friendly_name, 
-             view_name, created_at, is_workbook_owner) %>% 
-    arrange(workbook_name, user_name, created_at, view_name) 
+  filter(event_type_name == "Access View") %>% 
+  distinct(project_name, workbook_name, 
+           user_name, friendly_name, user_type, user_hq_div,
+           view_name, created_at,  user_login_at, is_workbook_owner) %>% 
+  arrange(workbook_name, user_name, created_at, view_name) 
 #create a variable to identify a unique interaction or view
 df_access <- df_access %>%
-    group_by(user_name, workbook_name, view_name) %>% 
-    mutate(unique_view = created_at == min(created_at) | 
-             created_at > (lag(created_at) + minutes(15))) %>% 
-    ungroup() 
+  group_by(user_name, workbook_name, view_name) %>% 
+  mutate(unique_view = created_at == min(created_at) | 
+           created_at > (lag(created_at) + minutes(15))) %>% 
+  ungroup() 
 #create a variable to identify a unique sessions with a workbook
 df_access <- df_access %>% 
-    group_by(user_name, workbook_name) %>% 
-    mutate(unique_session = created_at == min(created_at) | 
-             created_at > (lag(created_at) + minutes(15))) %>% 
-    ungroup() %>% 
-    mutate(unique_session = ifelse(is.na(unique_session), 
-                                   TRUE, unique_session))
+  group_by(user_name, workbook_name) %>% 
+  mutate(unique_session = created_at == min(created_at) | 
+           created_at > (lag(created_at) + minutes(15))) %>% 
+  ungroup() %>% 
+  mutate(unique_session = ifelse(is.na(unique_session), 
+                                 TRUE, unique_session)) 
 ```
 
 ### What does the trend in access look like over the 6 month period?
@@ -403,32 +435,133 @@ df_tab_ordering %>%
                       Source: OHA Folder Project Historical Event Data {date_range}")) +
   si_style_nolines()
 
-
-
-df_pd_views %>% 
-  distinct(workbook_name)
 ```
 
+
+
+### Who benefits from the workbook/view - SIEI, OHA, or missions?
+
+```{r}
+df_user_access <- df_access %>% 
+  mutate(aff = str_extract(friendly_name, "(?<=\\().*(?=\\))"),
+         user_type = case_when(!is.na(user_type) ~ user_type,
+                         str_detect(aff, "^GH/OHA") ~ "OHA",
+                         str_detect(aff, "^(GH?HCTM|LAB|M/)") ~ "Other HQ",
+                         TRUE ~ "Field"),
+         user_type_disp = case_when(user_hq_div == "SIEI" ~ "SIEI",
+                                    user_type == "OHA" ~ "Rest of OHA",
+                                    TRUE ~ user_type),
+         user_type_disp = factor(user_type_disp, c("Field", "Rest of OHA", "SIEI", "Other HQ")),
+         fill_color = case_when(user_type_disp == "Field" ~ burnt_sienna,
+                                user_type_disp == "Rest of OHA" ~ denim,
+                                user_type_disp == "SIEI" ~ scooter,
+                                user_type_disp == "Other HQ" ~ trolley_grey)
+         ) %>% 
+  select(-aff)
+  
+  df_user_access %>% 
+    distinct(workbook_name, user_name, user_type_disp, fill_color) %>%
+    count(workbook_name, user_type_disp, fill_color, name = "n_users") %>% 
+    ggplot(aes(n_users, fct_reorder(workbook_name, n_users, sum, na.rm = TRUE),
+               fill = fill_color)) +
+    geom_col() +
+    facet_grid(~user_type_disp) +
+    scale_fill_identity() +
+    labs(x = NULL, y = NULL,
+         subtitle = "Distinct users by workbook over the period") +
+    si_style_xgrid()
+        
+  
+  df_user_access %>% 
+    filter(unique_session == TRUE,
+           user_type_disp != "Other HQ") %>% 
+    exclude_wkbk_owner() %>% 
+    count(workbook_name, user_type_disp, fill_color, name = "n_uniq_sess") %>% 
+    ggplot(aes(n_uniq_sess, fct_reorder(workbook_name, n_uniq_sess, sum, na.rm = TRUE),
+               fill = fill_color)) +
+    geom_col() +
+    facet_grid(~user_type_disp) +
+    scale_fill_identity() +
+    labs(x = NULL, y = NULL,
+         subtitle = "Number of unique sessions by workbook over the period",
+         caption = glue("A new session occurs at log in or interacting after a 15 minute or more break; minimal 'other HQ' user activity removed; excluded workbook owners
+       Source: OHA Folder Project Historical Event Data {date_range}")) +
+    si_style_xgrid()
+
+  
+  df_user_access %>% 
+    filter(unique_session == TRUE,
+           user_type_disp != "Other HQ") %>% 
+    exclude_wkbk_owner() %>% 
+    count(workbook_name, user_type_disp, fill_color, name = "n_uniq_sess") %>% 
+    group_by(workbook_name) %>% 
+    mutate(share_uniq_sess = n_uniq_sess/sum(n_uniq_sess)) %>% 
+    ungroup() %>% 
+    ggplot(aes(share_uniq_sess, fct_reorder(workbook_name, n_uniq_sess, sum, na.rm = TRUE),
+               fill = fill_color)) +
+    geom_col() +
+    facet_grid(~user_type_disp) +
+    scale_x_continuous(labels = percent) +
+    scale_fill_identity() +
+    labs(x = NULL, y = NULL,
+         subtitle = "Share of unique sessions by workbook and group over the period",
+         caption = glue("A new session occurs at log in or interacting after a 15 minute or more break; minimal 'other HQ' user activity removed
+       Source: OHA Folder Project Historical Event Data {date_range}")) +
+    si_style_xgrid()
+
+```
+
+
+### Are users viewing one or multiple tabs in a session?
 
 ```{r}
 
-df_access %>% 
+df_sess_length <- df_access %>%
   exclude_wkbk_owner() %>% 
   flag_cover_pg(remove = TRUE) %>% 
-  filter(unique_session == TRUE,
-         workbook_name == "Key Populations Dashboard") %>% 
-  count(friendly_name, user_name, sort = TRUE) 
-  
+  distinct(workbook_name, user_name, user_login_at, view_name, created_at) %>%
+  count(workbook_name, user_name, user_login_at) %>% 
+  group_by(workbook_name) %>% 
+  summarise(n_uniq_sess = n(),
+            median_views = median(n),
+            mean_views = mean(n),
+            .groups = "drop")
 
-df_access %>% 
+df_access %>%
   exclude_wkbk_owner() %>% 
   flag_cover_pg(remove = TRUE) %>% 
-  filter(unique_session == TRUE) %>% 
-  count(friendly_name, user_name, sort = TRUE) 
+  distinct(workbook_name, user_name, user_login_at, view_name, created_at) %>%
+  count(workbook_name, user_name, user_login_at) %>% 
+  summarise(n_uniq_sess = n(),
+            median_views = median(n),
+            mean_views = mean(n),
+            .groups = "drop")
 
+df_sess_length <- df_full_views %>% 
+  flag_cover_pg(remove = TRUE) %>% 
+  count(workbook_name, name = "wkbk_tot_shts") %>% 
+  tidylog::full_join(df_sess_length, ., by = "workbook_name") %>% 
+  mutate(across(where(is.numeric), ~ifelse(is.na(.), 0, .)),
+         wkbk_display = ifelse(n_uniq_sess == max(n_uniq_sess), 
+                               glue("{workbook_name} [total workbook views: {comma(n_uniq_sess, 1)}]"),
+                                 glue("{workbook_name} [{comma(n_uniq_sess, 1)}]")))
+
+df_sess_length %>%   
+  ggplot(aes(median_views, fct_reorder(wkbk_display, n_uniq_sess)), color = "white") +
+  geom_col(aes(wkbk_tot_shts), fill = moody_blue_light, alpha = .9) +
+  geom_col(fill = moody_blue) +
+  geom_vline(xintercept = seq(0, max(df_sess_length$wkbk_tot_shts) + 1, 1), 
+             color = "white") +
+  scale_x_continuous(expand = c(.005, .005), position = "top",
+                     breaks = seq(0, max(df_sess_length$wkbk_tot_shts) + 1, 5)) +
+  labs(x = NULL, y = NULL,
+       title = glue("USERS ARE <span style='color:{moody_blue}'>TYPICALLY VIEWING TWO TABS</span> REGARDLESS OF THE <span style='color:{moody_blue_light}'>TOTAL TABS</span> IN THE WORKBOOK"),
+       subtitle = "Median tabs viewed by a user in a session",
+       caption = glue("A new session occurs at log in or interacting after a 15 minute or more break; excludes workbook owners and cover page views
+       Source: OHA Folder Project Historical Event Data {date_range}")) +
+  si_style_nolines() +
+  theme(plot.title = element_markdown())
 ```
-
-
 
 
 
