@@ -1,11 +1,11 @@
 ---
-title: "03_explore_usage"
+title: "EXPLORING OHA'S TABLEAU SERVER USAGE"
 author: "A.Chafetz"
-date: {r Sys.Date()}
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
 knit: (function(inputFile, encoding) { 
       rmarkdown::render(inputFile,
                         encoding=encoding,
-                        output_file = "tableau-server-usage" 
+                        output_file = "tableau-server-usage", 
                         output_dir=here::here('markdown'))})
 output: word_document
 ---
@@ -14,9 +14,13 @@ output: word_document
 knitr::opts_chunk$set(echo = TRUE,
                       fig.retina = 2)
 ```
+
+## OVERVIEW
+
 Starting at the end of January  2022, M/CIO setup a monthly refresh of the Tableau Postgres DB to pull specified data fields on Tableau Server usage for the OHA folder. At this point, we only have data available for the prior 6 months. This analysis will review the most recent data available.
 
 ```{r message=FALSE, warning=FALSE}
+#dependencies
   library(tidyverse)
   library(glamr)
   library(vroom)
@@ -30,6 +34,9 @@ Starting at the end of January  2022, M/CIO setup a monthly refresh of the Table
   library(ggtext)
 ```
  
+## DATA IMPORT AND MUNGING
+
+The first thing we need to do is import the latest version data available.
  
 ```{r}
 #identify latest file
@@ -43,7 +50,7 @@ basename(file)
 df_usage <- vroom(file, col_types = c(.default = "c"))
 ```
 
-A few columns are being currently treated as characters (`created_at`, `user_login_at`, and `user_logout_at`) and need to be converted to date/time.
+We imported all the columns as characters for ease on the import side of things, but we need to convert a few columns (`created_at`, `user_login_at`, and `user_logout_at`) to date/time format.
 
 ```{r}
 df_usage <- df_usage %>% 
@@ -51,7 +58,7 @@ df_usage <- df_usage %>%
                 mdy_hms, quiet = TRUE))
 ```
 
-We need to identify the workbook owner/developer to exclude them from any view analysis.
+We need to identify the workbook owner/developer to exclude them from any view analysis. While this isn't specified in the data, we can identify the workbook owners based on who is publishing or updating them (classified under `action_type`). 
 
 ```{r}
  #identify workbook owner in order to exclude from counts
@@ -70,9 +77,9 @@ We need to identify the workbook owner/developer to exclude them from any view a
   
 ```
 
-We can limit this analysis down to just the OHA workbooks identified in the [products calendar](https://sites.google.com/a/usaid.gov/gh-oha/home/oha-data-tools-resources/-oha-product-calendar).
+We can limit this analysis down to just the OHA workbooks identified in the [products calendar](https://sites.google.com/a/usaid.gov/gh-oha/home/oha-data-tools-resources/-oha-product-calendar). These products were identified in the products calendar and manually captured in [this Google Sheet](https://docs.google.com/spreadsheets/d/1-9U7EVKDXwWH_iSSp0BGnhEdPzuBEqC1CcgRDvBAtGQ/edit?usp=sharing).  
 
-```{r}
+```{r message=FALSE}
 gs_sheet_id <- as_sheets_id("1-9U7EVKDXwWH_iSSp0BGnhEdPzuBEqC1CcgRDvBAtGQ")
 df_focal_wkbks <- read_sheet(gs_sheet_id)
 
@@ -80,40 +87,49 @@ df_usage <- df_usage %>%
   filter(workbook_name %in% df_focal_wkbks$workbook_name)
 ```
 
-It will also be useful to flag what types of users are accessing the workbooks.
+It will also be useful to flag what types of users are accessing the workbooks. These data, captured in [this Google Sheet](https://docs.google.com/spreadsheets/d/1kl6rnpCELoWaOXfBr5qlhNw4rwAWMWtMRerOIqADgCU/edit?usp=sharing), were pulled from Tableau User Group data (OHA v Field) and from a BOD survey in October 2021 (what division HQ users are in). I relied on the data from [this Tableau workbook](https://tableau.usaid.gov/#/workbooks/3611/views).
 
-```{r}
+```{r message=FALSE}
 gs_sheet_id_users <- as_sheets_id("1kl6rnpCELoWaOXfBr5qlhNw4rwAWMWtMRerOIqADgCU")
 df_user_base <- read_sheet(gs_sheet_id_users, sheet = "location")
 df_user_div <- read_sheet(gs_sheet_id_users, sheet = "division")
+```
 
+```{r include=FALSE}
+#check to ensure each user is only assigned with one type
+df_user_base %>%
+  group_by(`User Name`) %>%
+  filter(n() > 1)
+  
+#check to ensure each user is only assigned with one type
+ df_user_div %>%
+  group_by(`User Name`) %>%
+  filter(n() > 1)
+```
+
+Let's clean up the datasets and then merge them with our usage data we can use them together.
+
+```{r}
 df_user_base <- df_user_base %>%
-  #check to ensure each user is only assigned with one type
-  # group_by(`User Name`) %>% 
-  # filter(n() > 1)
   rename(user_name = `User Name`,
          user_type = `User Type`) %>% 
   mutate(user_name = tolower(user_name))
 
 df_user_div <- df_user_div %>%
-  #check to ensure each user is only assigned with one type
-  # group_by(`User Name`) %>%
-  # filter(n() > 1)
   rename(user_name = `User Name`,
          user_hq_div = Division)
 
-df_user <- tidylog::full_join(df_user_base, df_user_div, by = "user_name")
+df_user <- full_join(df_user_base, df_user_div, by = "user_name")
 
 df_usage <- df_user_base %>% 
-  tidylog::full_join(df_user_div, by = "user_name") %>% 
-  tidylog::left_join(df_usage, ., by = "user_name") %>% 
+  full_join(df_user_div, by = "user_name") %>% 
+  left_join(df_usage, ., by = "user_name") %>% 
   relocate(user_type, user_hq_div, .after = user_name)
-
 ```
 
-Let's remove any Tableau workbooks that are in the Administrator, Archive, Draft, DRAFT, Draft Workbooks, Drafts, Drafts/QC, or PrEP Workbook in Progress/QC and any workbooks titles that contain draft, QC, or dummy.
 
-```{r}
+```{r include = FALSE}
+#Let's remove any Tableau workbooks that are in the Administrator, Archive, Draft, DRAFT, Draft Workbooks, Drafts, Drafts/QC, or PrEP Workbook in Progress/QC and any workbooks titles that contain draft, QC, or dummy.
 df_usage <- df_usage %>% 
   filter(project_name %ni% c("Administrator", "Archive", "Draft", "DRAFT",
                              "Draft Workbooks", "Drafts", "Drafts/QC", 
@@ -127,13 +143,13 @@ df_usage <- df_usage %>%
 Lastly, let's create some useful functions of code we will repeat in our analysis.
 
 ```{r}
-#exclude workbook owners
+#exclude workbook owners from data frame
 exclude_wkbk_owner <- function(df){
   df %>% 
     filter(is_workbook_owner == FALSE)
 }
 
-#id/exclude cover page
+#id or exclude cover page from data frame
 flag_cover_pg <- function(df, remove = FALSE){
   df <- df %>% 
      mutate(is_cover = str_detect(view_name,
@@ -147,6 +163,7 @@ flag_cover_pg <- function(df, remove = FALSE){
 
 ```
 
+## ABOUT THE DATA
 
 ```{r, include=FALSE}
 date_range <- df_usage %>% 
@@ -156,9 +173,11 @@ date_range <- df_usage %>%
     pull()
 ```
 
-The data from `r basename(file)` covers the period from `r date_range`. Across this time frame, OHA's Tableau Server folder contained `r length(unique(df_usage$workbook_name)) ` workbooks and had `r length(unique(df_usage$user_name))` unique users access these workbooks.
+Now that we have the data cleaned up a bit, we can do a quick summary of it. The data from `r basename(file)` covers the period from `r date_range`. Across this time frame, looking at just OHA's workbooks from the product calendar, the Tableau Server folder contained `r length(unique(df_usage$workbook_name)) ` workbooks and had `r length(unique(df_usage$user_name))` unique users access these workbooks.
 
-Create unique view and sessions for counting
+### BASE DATA FOR ANALYSIS
+
+For our analysis, we want to focus on questions regarding Tableau usage by users, primarily around access. Since users can show up multiple times for the same viewing event (due to the fact that a user may be part of multiple user groups), we need to create a distinct dataset where each row is a viewing event.
 
 ```{r}
 #limit events to just Access View and limit variables
@@ -168,23 +187,39 @@ df_access <- df_usage %>%
            user_name, friendly_name, user_type, user_hq_div,
            view_name, created_at,  user_login_at, is_workbook_owner) %>% 
   arrange(workbook_name, user_name, created_at, view_name) 
+```
+
+```{r include=F}
+sess_duration <- 15
+```
+
+It will also be useful to us later to identify unique views of a tab by a users and unique session within a workbook, defined here as `r sess_duration` minutes.
+
+```{r}
 #create a variable to identify a unique interaction or view
 df_access <- df_access %>%
   group_by(user_name, workbook_name, view_name) %>% 
   mutate(unique_view = created_at == min(created_at) | 
-           created_at > (lag(created_at) + minutes(15))) %>% 
+           created_at > (lag(created_at) + minutes(sess_duration))) %>% 
   ungroup() 
 #create a variable to identify a unique sessions with a workbook
 df_access <- df_access %>% 
-  group_by(user_name, workbook_name) %>% 
+  group_by(user_name, workbook_name, user_login_at) %>% 
   mutate(unique_session = created_at == min(created_at) | 
-           created_at > (lag(created_at) + minutes(15))) %>% 
+           created_at > (lag(created_at) + minutes(sess_duration))) %>% 
   ungroup() %>% 
   mutate(unique_session = ifelse(is.na(unique_session), 
                                  TRUE, unique_session)) 
 ```
 
-### What does the trend in access look like over the 6 month period?
+## DATA EXPLORATION
+
+The remainder of this document will explore particular areas of interest around Tableau Server usage for OHA products. Each section will attempt to answer a key question geared at guiding our understanding of how USAID/PEPFAR HQ and field users interact with OHA data products. 
+
+### What does the trend in access look like over the period?
+
+Does viewership follow a normal trend? Are there key peaks associated wtih data releases, holidays, or COP?
+
 ```{r, echo=FALSE, fig.height=3, fig.width=6, dpi=300}
 df_access %>% 
   exclude_wkbk_owner() %>%
@@ -192,8 +227,10 @@ df_access %>%
   count(date, wt = unique_session) %>% 
   ggplot(aes(date, n)) +
   geom_area(color = trolley_grey, fill = trolley_grey_light, alpha = .6) +
-  scale_x_date(date_breaks = "1 month") +
+  scale_x_date(date_breaks = "1 month",
+               date_labels = "%b %Y") +
   labs(x = NULL, y = NULL,
+       title = "LARGE SPIKE IN USAGE ON WORLD AIDS DAY",
        subtitle = "Unique Daily Tableau Server Sessions",
        caption = glue("A new session occurs at log in or interacting after a 15 minute or more break
        Source: OHA Folder Project Historical Event Data {date_range}")) +
@@ -201,6 +238,8 @@ df_access %>%
 ```
 
 ### How many tabs does a workbook have?
+
+How many tabs does the average workbook have? Are more or less tabs preferred or more effective?
 
 ```{r}
 df_full_views <- df_usage %>% 
@@ -233,6 +272,8 @@ df_viz_views %>%
 
 
 ### What does the distribution of view usage look like?
+
+For a typical view/tab, what does the distribution of interactions look like over the period? Are there tabs that stand out as having tons of views? Are there things we can learn from these workbooks/views that make them more accessible or that the owners are doing to point people to this resource? Where do most tabs fall on the spectrum of usage?
 
 ```{r, echo=FALSE, fig.height=3, fig.width=6, dpi=300}
   df_viz_unique_views <- df_access %>% 
@@ -282,6 +323,8 @@ If we aggregate the views up by workbook, the median workbook has `r median(df_v
 
 ### Are Analyst Downloading Workbooks from Server?
 
+Which worksbooks are frequently downloaded to allow analyst to make their own adjustments to what has already been created?
+
 ```{r, echo=FALSE, fig.height=3, fig.width=6, dpi=300}
 df_usage %>%
   filter(event_type_name == "Download Workbook") %>% 
@@ -301,27 +344,17 @@ df_usage %>%
   geom_col() +
   scale_x_continuous(expand = c(.005, .005)) +
   labs(x = NULL, y = NULL,
-       subtitle = "Number of distinct downloads") +
+       subtitle = "Number of distinct downloads",
+       caption = "Number of distinct users downloading next to each workbook name") +
   si_style()
  
 ```
 
-```{r, include=FALSE}
-df_access %>% 
-  filter(user_name == "bddamulira",
-         workbook_name == "Advanced HIV Disease Quarterly Workbook",
-         as.Date(created_at) == "2021-11-16") %>%
-  select(created_at, view_name) %>% 
-  mutate(duration = lead(created_at) - created_at)
-  
-```
-
 ### Can we identify under-utilized views or workbooks?
 
+What tabs are highly viewed? Which ones are not? Do we see trends in when they are viewed? Is there any relationship between the order and frequency of viewership?
+
 ```{r}
-
-glimpse(df_access)
-
 df_pd_views <- df_access %>% 
   exclude_wkbk_owner() %>% 
   flag_cover_pg(remove = TRUE) %>% 
@@ -369,9 +402,6 @@ df_pd_views %>%
             n_above_min_view_rate = sum(above_min_view_rate)) %>% 
   mutate(share_above_min_view_rate = n_above_min_view_rate/n_tabs)
   
-  distinct(workbook_name, workbook_nam, distinct_views_period) 
-
-
 updates <- glamr::pepfar_data_calendar %>% 
   mutate(msd_release = as.Date(entry_close) + weeks(1)) %>% 
   filter(#type == "initial",
@@ -380,7 +410,6 @@ updates <- glamr::pepfar_data_calendar %>%
   select(fiscal_year, quarter, type, msd_release) %>% 
   pivot_wider(names_from = type,
               values_from = msd_release)
-  pull()
 
 df_pd_views %>% 
   filter(distinct_views_period > 100) %>% 
@@ -441,7 +470,10 @@ df_tab_ordering %>%
 
 ### Who benefits from the workbook/view - SIEI, OHA, or missions?
 
+Are there workbooks primarily used by SIEI? Are there workbook that the field leverages more than OHA? 
+
 ```{r}
+#clean up user groups
 df_user_access <- df_access %>% 
   mutate(aff = str_extract(friendly_name, "(?<=\\().*(?=\\))"),
          user_type = case_when(!is.na(user_type) ~ user_type,
@@ -458,7 +490,10 @@ df_user_access <- df_access %>%
                                 user_type_disp == "Other HQ" ~ trolley_grey)
          ) %>% 
   select(-aff)
-  
+```
+
+```{r}
+
   df_user_access %>% 
     distinct(workbook_name, user_name, user_type_disp, fill_color) %>%
     count(workbook_name, user_type_disp, fill_color, name = "n_users") %>% 
@@ -514,6 +549,8 @@ df_user_access <- df_access %>%
 
 ### Are users viewing one or multiple tabs in a session?
 
+Are users looking through the whole workbook? Are they stopping after a few tabs? Are they being linked to where they want to go and they stop there?
+
 ```{r}
 
 df_sess_length <- df_access %>%
@@ -563,5 +600,16 @@ df_sess_length %>%
   theme(plot.title = element_markdown())
 ```
 
+
+
+```{r, include=FALSE}
+df_access %>% 
+  filter(user_name == "bddamulira",
+         workbook_name == "Advanced HIV Disease Quarterly Workbook",
+         as.Date(created_at) == "2021-11-16") %>%
+  select(created_at, view_name) %>% 
+  mutate(duration = lead(created_at) - created_at)
+  
+```
 
 
