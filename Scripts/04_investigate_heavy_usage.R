@@ -148,6 +148,7 @@
     mutate(is_publish_view = ifelse(is.na(is_publish_view), FALSE, is_publish_view),
            is_cover_page = str_detect(view_name,
                                  "^Cover |^Cover$|CoverPage|Intro|Contents|0\\.Home|Country Overview|Introduction|Notes|$Title"),
+           is_cover_page = ifelse(is.null(is_cover_page), FALSE, is_cover_page) %>%
            is_data_comm = user_name %in% data_comm,
            is_siei = user_name %in% siei,
            is_key_wkbk = workbook_name %in% products)
