@@ -30,12 +30,9 @@
 
   groups_id <- as_sheets_id("1qbWro_x_QwxavUsPrzUWfhouDF6NUff7VwVJzkn9jvo")
 
-  load_secrets("email")
-  data_comm <- c("achafetz@usaid.gov", "ayansaneh@usaid.gov", "alerichardson@usaid.gov", "aiqudus@usaid.gov", "aschmale@usaid.gov", "amakulec@usaid.gov", "adjapovicscholl@usaid.gov", "abuschur@usaid.gov", "amompe@usaid.gov", "bkagniniwa@usaid.gov", "bbetz@usaid.gov", "cmanoukian@usaid.gov", "cloukas@usaid.gov", "cargonzalez@usaid.gov", "cnichols@usaid.gov", "chknight@usaid.gov", "dsong@usaid.gov", "dcollison@usaid.gov", "damin@usaid.gov", "elcallahan@usaid.gov", "elhart@usaid.gov", "erdunlap@usaid.gov", "fabarcarealegeno@usaid.gov", "gsarfaty@usaid.gov", "gmorgan@usaid.gov", "iborces@usaid.gov", "ivferrer@usaid.gov", "jmontespenaloza@usaid.gov", "jbuttolph@usaid.gov", "jehoover@usaid.gov", "jrose@usaid.gov", "jstephens@usaid.gov", "jwun@usaid.gov", "jmungurerebaker@usaid.gov", "jodavis@usaid.gov", "jkamunyori@usaid.gov", "jflores@usaid.gov", "jkohler@usaid.gov", "ksrikanth@usaid.gov", "kfertakis@usaid.gov", "kabuelgasim@usaid.gov", "kkarimovahashkes@usaid.gov", "kobradley@usaid.gov", "laavery@usaid.gov", "lbaraki@usaid.gov", "lkovacevic@usaid.gov", "mzendt@usaid.gov", "mschneider@usaid.gov", "mau@usaid.gov", "marsbailey@usaid.gov", "marsbailey@usaid.gov", "msattah@usaid.gov", "medouglas@usaid.gov", "meapeterson@usaid.gov", "mdessie@usaid.gov", "mhartig@usaid.gov", "myep@usaid.gov", "npetrovic@usaid.gov", "nmcdavid@usaid.gov", "nmaina@usaid.gov", "nagbodo@usaid.gov", "rbricenorobaugh@usaid.gov", "reross@usaid.gov", "rbhattacharjee@usaid.gov", "rgriffin@usaid.gov", "rakter@usaid.gov", "smahadevan@usaid.gov", "tessam@usaid.gov", "tmukherjee@usaid.gov", "vbiryukova@usaid.gov", "wjose@usaid.gov")
-  data_comm <- str_remove(data_comm, "@usaid.gov")
+  wkbks_id <- as_sheets_id("1-9U7EVKDXwWH_iSSp0BGnhEdPzuBEqC1CcgRDvBAtGQ")
 
-  siei <- c("achafetz@usaid.gov", "araji@usaid.gov", "aiqudus@usaid.gov", "amakulec@usaid.gov", "adjapovicscholl@usaid.gov", "aanandhapriya@usaid.gov", "abuschur@usaid.gov", "amompe@usaid.gov", "bkagniniwa@usaid.gov", "cmanoukian@usaid.gov", "cloukas@usaid.gov", "cnichols@usaid.gov", "chknight@usaid.gov", "dsong@usaid.gov", "dcollison@usaid.gov", "dcamara@usaid.gov", "dsesay@usaid.gov", "damin@usaid.gov", "elhart@usaid.gov", "erdunlap@usaid.gov", "gsarfaty@usaid.gov", "gha@usaid.gov", "gmorgan@usaid.gov", "jbuehler@usaid.gov", "jmontespenaloza@usaid.gov", "jbuttolph@usaid.gov", "jstephens@usaid.gov", "jrose@usaid.gov", "jmungurerebaker@usaid.gov", "jkamunyori@usaid.gov", "jkohler@usaid.gov", "ksrikanth@usaid.gov", "kkarimovahashkes@usaid.gov", "lbaraki@usaid.gov", "lkovacevic@usaid.gov", "lhaile@usaid.gov", "mzendt@usaid.gov", "mschneider@usaid.gov", "msattah@usaid.gov", "mdessie@usaid.gov", "nmcdavid@usaid.gov", "nmaina@usaid.gov", "nagbodo@usaid.gov", "oogunwobi@usaid.gov", "rbhattacharjee@usaid.gov", "rakter@usaid.gov", "smahadevan@usaid.gov", "tessam@usaid.gov", "vbiryukova@usaid.gov", "wjose@usaid.gov", "whanna@usaid.gov", "mau@usaid.gov")
-  siei <- str_remove(siei, "@usaid.gov")
+  load_secrets("email")
 
 # IMPORT ------------------------------------------------------------------
 
@@ -49,6 +46,9 @@
     map_dfr(~read_sheet(groups_id,
                         sheet = .x),
             .id = "type")
+
+  #OHA analytic products
+  df_analytic_products <- read_sheet(wkbks_id)
 
 # MUNGE -------------------------------------------------------------------
 
@@ -64,11 +64,49 @@
     filter(type == "siei") %>%
     pull()
 
+  #workbooks
+  products <- df_analytic_products$workbook_name
+
   #convert to date/time type
   df_usage <- df_usage %>%
     mutate(across(c(created_at, user_login_at, user_logout_at),
                   \(x) mdy_hms(x, quiet = TRUE)))
 
+
+  #remove unnecessary columns
+  df_usage <- df_usage %>%
+    select(-c(grant_allowed_by, is_failure, worker,
+              datasource_id, duration_in_ms, project_id,
+              type_id, user_id, view_id, workbook_id,
+              user_or_group_name, permissions_granted))
+
+  #remove duplication caused by user_or_group_name
+  df_usage <- distinct(df_usage)
+
+  #reorder
+  df_usage <- df_usage %>%
+    relocate(created_at, hist_event_id, action_type, event_type_name,
+             project_name, workbook_name, view_name, datasource_name,
+             friendly_name, user_name, user_login_at, user_logout_at,
+             .after = 1) %>%
+    arrange(created_at)
+
+  #clean up friendly names -> make friendlier
+  df_usage <- df_usage %>%
+    mutate(friendly_name = str_replace(friendly_name, "(.*?),(.*?)(,)", "\\1\\2"), #remove extra comma for last name extaction
+           has_comma = str_detect(friendly_name, ","),
+           has_org = str_detect(friendly_name, "\\("),
+           name_first = case_when(has_comma == FALSE ~ str_extract(friendly_name, "^\\w+"),
+                                  has_org ~ str_extract(friendly_name, "(?<=, ).*(?=\\()") %>% str_trim(),
+                                  has_comma ~ str_extract(friendly_name, "(?<=, ).*")),
+           # name_first = str_remove(name_first, " [:alpha:]{1}\\.$"),
+           name_last = case_when(has_comma ~ str_extract(friendly_name, "^.*(?=\\,)"),
+                                 has_org ~ str_extract(friendly_name, "(?<= ).*(?=\\()"),
+                                 has_comma == FALSE & has_org == FALSE ~ str_extract(friendly_name, "(?<= ).*")),
+           name_full = glue("{name_first} {name_last}"),
+           org_unit = str_extract(friendly_name, "(?<=\\().*(?=\\))"),
+           .after = friendly_name) %>%
+    select(-c(friendly_name, has_comma, has_org))
 
   #identify workbook owner in order to exclude from counts
   df_owner <- df_usage %>%
@@ -88,7 +126,7 @@
   df_publish_view_exclude <- df_usage %>%
     filter(event_type_name == "Publish Workbook") %>%
     arrange(created_at) %>%
-    distinct(workbook_name, friendly_name, pd_start = created_at) %>%
+    distinct(workbook_name, name_full, pd_start = created_at) %>%
     mutate(pd_end = pd_start + minutes(1),
            pd_start = pd_start - seconds(2),
            is_publish_view = TRUE)
@@ -104,54 +142,113 @@
   #create flags - auto view, cover page, membership
   df_usage <- df_usage %>%
     left_join(df_publish_view_exclude,
-              join_by(workbook_name, friendly_name,
+              join_by(workbook_name, name_full,
                       between(created_at, pd_start, pd_end))) %>%
     select(-starts_with("pd")) %>%
     mutate(is_publish_view = ifelse(is.na(is_publish_view), FALSE, is_publish_view),
            is_cover_page = str_detect(view_name,
                                  "^Cover |^Cover$|CoverPage|Intro|Contents|0\\.Home|Country Overview|Introduction|Notes|$Title"),
            is_data_comm = user_name %in% data_comm,
-           is_siei = user_name %in% siei)
+           is_siei = user_name %in% siei,
+           is_key_wkbk = workbook_name %in% products)
 
   #create flags - qc window
-  df_usage2 <- df_usage %>%
+  df_usage <- df_usage %>%
     left_join(df_qc,
               join_by(between(created_at, msd_release, qc_close))) %>%
     select(-c(msd_release, qc_close)) %>%
-    mutate(is_qc_window = ifelse(is.na(is_qc_window), FALSE, is_publish_view))
-
-
-  df_usage2 %>%
-    filter(action_type == "Access",
-           between(created_at, as.Date("2023-11-15"), as.Date("2023-12-15"))) %>%
-    mutate(crated_at_date = as_date(created_at)) %>%
-    count(crated_at_date, is_qc_window) %>%
-    pivot_wider(names_from = is_qc_window, values_from = n) %>%
-    prinf()
-
-
-  df_views <- df_usage %>%
-    filter(event_type_name == "Access View") %>%
-    distinct(hist_event_id, friendly_name, workbook_name, view_name, created_at)
+    mutate(is_qc_window = ifelse(is.na(is_qc_window), FALSE, is_qc_window))
 
 
 
+# VIZ ---------------------------------------------------------------------
 
-  df_views %>%
-     filter(!is_publish_view) %>%
-     count(workbook_name, view_name, sort = TRUE) %>%
-     mutate(share = n/sum(n))
+  #what are the highest visited workbooks?
+  df_usage %>%
+    filter(event_type_name == "Access View",
+           is_key_wkbk,
+           !is_publish_view,
+           !is_cover_page,
+           !(is_data_comm & is_qc_window),) %>%
+    distinct(hist_event_id, name_full, workbook_name, created_at) %>%
+    count(workbook_name, sort = TRUE) %>%
+    mutate(share = n/sum(n),
+           share_cum = cumsum(share))
 
+  #what are the highest visited workbooks?
+  df_usage %>%
+    filter(event_type_name == "Access View",
+           is_key_wkbk,
+           !is_publish_view,
+           !is_cover_page,
+           !(is_data_comm & is_qc_window)) %>%
+    distinct(hist_event_id, name_full, workbook_name, view_name, created_at) %>%
+    count(workbook_name, view_name, sort = TRUE) %>%
+    mutate(share = n/sum(n),
+           share_cum = cumsum(share))
 
-   df_usage %>%
+  #who are the top users?
+  df_usage %>%
+    filter(event_type_name == "Access View",
+           is_key_wkbk,
+           !is_publish_view,
+           !is_cover_page,
+           !(is_data_comm & is_qc_window),
+           # !is_siei
+    ) %>%
+    distinct(hist_event_id, name_full, is_data_comm, workbook_name, view_name, created_at) %>%
+    count(name_full, is_data_comm, sort = TRUE, name = "views") %>%
+    mutate(share = views/sum(views),
+           share_cum = cumsum(share)) %>%
+    print(n = 25)
+
+   df_top <- df_usage %>%
      filter(event_type_name == "Access View",
+            is_key_wkbk,
             !is_publish_view,
             !is_cover_page,
             !(is_data_comm & is_qc_window),
-            ) %>%
-     distinct(hist_event_id, friendly_name, workbook_name, view_name, created_at) %>%
-     count(friendly_name, sort = TRUE, name = "views") %>%
-     mutate(share = views/sum(views)) %>%
-     print(n = 25)
+            # !is_siei
+     ) %>%
+     distinct(hist_event_id, name_full, is_data_comm, workbook_name, created_at) %>%
+     count(workbook_name, name_full, is_data_comm, sort = TRUE, name = "views")
 
-# VIZ ---------------------------------------------------------------------
+   # df_top <- df_top %>%
+   #   group_by(workbook_name) %>%
+   #   mutate(views_wkbk = sum(views)) %>%
+   #   ungroup() %>%
+   #   group_by(name_full) %>%
+   #   mutate(views_user = sum(views)) %>%
+   #   ungroup()
+
+   df_top <- df_top %>%
+     mutate(workbook_name = fct_lump(workbook_name, 25, w = views),
+            name_full = name_full %>%
+              as.character() %>%
+              str_trim %>%
+              fct_lump(25, w = views)) %>%
+     count(workbook_name, name_full, wt = views, name = "views")
+
+   df_top %>%
+     count(workbook_name, wt = views)
+
+   df_top %>%
+     count(name_full, wt = views) %>%
+     arrange(name_full)
+
+   levels(df_top$workbook_name)
+   df_top %>%
+     # filter(workbook_name != "Other",
+     #        name_full != "Other"
+     #   ) %>%
+     mutate(name_full = fct_reorder(name_full, views, sum),
+            workbook_name = fct_reorder(workbook_name, views, sum)
+            ) %>%
+     ggplot(aes(workbook_name, name_full)) +
+     geom_tile(aes(fill = views)) +
+     geom_text(aes(label = views)) +
+     scale_x_discrete(position = "top") +
+     labs(x = NULL, y = NULL) +
+     si_style_nolines() +
+     theme(axis.text.x = element_text(angle = 90,
+                                      hjust = 0))
