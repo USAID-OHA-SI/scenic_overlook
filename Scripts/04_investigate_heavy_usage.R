@@ -99,8 +99,7 @@
     mutate(qc_close = msd_release + days(7),
            msd_release = msd_release + days(1),
            across(c(msd_release, qc_close), as_datetime),
-           is_qc_window = TRUE,
-           action_type = "Access")
+           is_qc_window = TRUE)
 
   #create flags - auto view, cover page, membership
   df_usage <- df_usage %>%
@@ -117,8 +116,7 @@
   #create flags - qc window
   df_usage2 <- df_usage %>%
     left_join(df_qc,
-              join_by(action_type,
-                      between(created_at, msd_release, qc_close))) %>%
+              join_by(between(created_at, msd_release, qc_close))) %>%
     select(-c(msd_release, qc_close)) %>%
     mutate(is_qc_window = ifelse(is.na(is_qc_window), FALSE, is_publish_view))
 
@@ -126,7 +124,8 @@
   df_usage2 %>%
     filter(action_type == "Access",
            between(created_at, as.Date("2023-11-15"), as.Date("2023-12-15"))) %>%
-    count(day(created_at), is_qc_window) %>%
+    mutate(crated_at_date = as_date(created_at)) %>%
+    count(crated_at_date, is_qc_window) %>%
     pivot_wider(names_from = is_qc_window, values_from = n) %>%
     prinf()
 

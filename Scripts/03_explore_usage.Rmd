@@ -55,7 +55,7 @@ We imported all the columns as characters for ease on the import side of things,
 ```{r}
 df_usage <- df_usage %>% 
   mutate(across(c(created_at, user_login_at, user_logout_at), 
-                mdy_hms, quiet = TRUE))
+                \(x) mdy_hms(x, quiet = TRUE)))
 ```
 
 We need to identify the workbook owner/developer to exclude them from any view analysis. While this isn't specified in the data, we can identify the workbook owners based on who is publishing or updating them (classified under `action_type`). 
@@ -84,7 +84,7 @@ gs_sheet_id <- as_sheets_id("1-9U7EVKDXwWH_iSSp0BGnhEdPzuBEqC1CcgRDvBAtGQ")
 df_focal_wkbks <- read_sheet(gs_sheet_id)
 
 df_usage <- df_usage %>% 
-  filter(workbook_name %in% df_focal_wkbks$workbook_name)
+  filter(workbook_name %in% c(df_focal_wkbks$workbook_name, "HFR Dashboard"))
 ```
 
 It will also be useful to flag what types of users are accessing the workbooks. These data, captured in [this Google Sheet](https://docs.google.com/spreadsheets/d/1kl6rnpCELoWaOXfBr5qlhNw4rwAWMWtMRerOIqADgCU/edit?usp=sharing), were pulled from Tableau User Group data (OHA v Field) and from a BOD survey in October 2021 (what division HQ users are in). I relied on the data from [this Tableau workbook](https://tableau.usaid.gov/#/workbooks/3611/views).
@@ -222,7 +222,7 @@ Does viewership follow a normal trend? Are there key peaks associated wtih data 
 
 ```{r, echo=FALSE, fig.height=3, fig.width=6, dpi=300}
 df_access %>% 
-  exclude_wkbk_owner() %>%
+  # exclude_wkbk_owner() %>%
   mutate(date = as.Date(created_at)) %>% 
   count(date, wt = unique_session) %>% 
   ggplot(aes(date, n)) +
@@ -232,7 +232,7 @@ df_access %>%
   labs(x = NULL, y = NULL,
        title = "LARGE SPIKE IN USAGE ON WORLD AIDS DAY",
        subtitle = "Unique Daily Tableau Server Sessions",
-       caption = glue("A new session occurs at log in or interacting after a 15 minute or more break
+       caption = glue("A new session occurs at log in or interacting after a {sess_duration} minute or more break
        Source: OHA Folder Project Historical Event Data {date_range}")) +
   si_style()
 ```
@@ -277,7 +277,7 @@ For a typical view/tab, what does the distribution of interactions look like ove
 
 ```{r, echo=FALSE, fig.height=3, fig.width=6, dpi=300}
   df_viz_unique_views <- df_access %>% 
-    exclude_wkbk_owner() %>% 
+    # exclude_wkbk_owner() %>% 
     bind_rows(df_full_views) %>% 
     count(workbook_name, view_name, wt = unique_view, name = "n_unique_views") %>%
     mutate(n_unique_views = ifelse(is.na(n_unique_views), 0, n_unique_views)) 
